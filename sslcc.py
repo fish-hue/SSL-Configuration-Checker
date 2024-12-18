@@ -22,18 +22,9 @@ DEFAULT_PORT = 443
 DEFAULT_TIMEOUT = 10
 
 # Default lists for weak and strong ciphers
-WEAK_CIPHERS = [
-    'RC4-SHA',
-    'RC4-MD5',
-    'DES-CBC3-SHA',
-    'EXP-EDH-RSA-DES-CBC-SHA',
-    'EXP-RC4-MD5'
-]
-STRONG_CIPHERS = [
-    'TLS_AES_128_GCM_SHA256',
-    'TLS_AES_256_GCM_SHA384'
-]
-DEPRECATED_PROTOCOLS = ['SSLv3']
+WEAK_CIPHERS = ['RC4-SHA', 'RC4-MD5', 'DES-CBC3-SHA', 'EXP-EDH-RSA-DES-CBC-SHA', 'EXP-RC4-MD5', '3DES-EDE3-SHA']
+STRONG_CIPHERS = ['TLS_AES_128_GCM_SHA256', 'TLS_AES_256_GCM_SHA384', 'TLS_CHACHA20_POLY1305', 'ECDHE-RSA-AES128-GCM-SHA256', 'ECDHE-RSA-AES256-GCM_SHA384']
+DEPRECATED_PROTOCOLS = ['SSLv3', 'TLSv1', 'TLSv1_1']  # Include deprecated protocols for checking
 
 # Exit codes
 EXIT_SUCCESS = 0
@@ -111,13 +102,14 @@ def check_ssl_configuration(host, port=DEFAULT_PORT, timeout=DEFAULT_TIMEOUT):
     """Check the SSL configuration for the specified host and port."""
     context = ssl.create_default_context()
     context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.maximum_version = ssl.TLSVersion.TLSv1_3  # Ensure TLSv1.3 is the maximum version
 
     try:
         logger.info(f"Checking SSL configuration for {host}:{port}")
         with socket.create_connection((host, port), timeout=timeout) as sock:
             with context.wrap_socket(sock, server_hostname=host) as ssock:
                 cert_binary = ssock.getpeercert(binary_form=True)
-                cert = ssock.getpeercert()
+                cert = ssock.getpeercert()  # Get the certificate
                 cipher_name = ssock.cipher()[0]  # Extract cipher name
                 protocol = ssock.version()
 
@@ -187,31 +179,48 @@ def check_certificate(cert, cert_binary):
     if logger.level != logging.WARNING:  # Check if quiet mode is active
         logger.debug(f"Certificate details: {cert}")
 
-    # Safely unpack key-value pairs
+    # Safely unpack key-value pairs, ensuring correct structure
+    issuer_items = cert.get('issuer', [])
+    subject_items = cert.get('subject', [])
+
+    # Create dictionaries for issuer and subject
     issuer = {}
-    for item in cert.get('issuer', []):
-        if len(item) == 2:  # Ensure we have a key-value pair
-            key, value = item
-            issuer[key] = value
+    for item in issuer_items:
+        # Check if item is a tuple with at least one key-value pair
+        if isinstance(item, tuple):
+            for sub_item in item:
+                if isinstance(sub_item, tuple) and len(sub_item) == 2:  # Expect key-value pairs
+                    key, value = sub_item
+                    issuer[key] = value
+                else:
+                    logger.warning(f"Unexpected item in issuer: {sub_item}")
         else:
             logger.warning(f"Unexpected item in issuer: {item}")
 
     subject = {}
-    for item in cert.get('subject', []):
-        if len(item) == 2:  # Ensure we have a key-value pair
-            key, value = item
-            subject[key] = value
+    for item in subject_items:
+        # Check if item is a tuple with at least one key-value pair
+        if isinstance(item, tuple):
+            for sub_item in item:
+                if isinstance(sub_item, tuple) and len(sub_item) == 2:  # Expect key-value pairs
+                    key, value = sub_item
+                    subject[key] = value
+                else:
+                    logger.warning(f"Unexpected item in subject: {sub_item}")
         else:
             logger.warning(f"Unexpected item in subject: {item}")
 
     logger.info(f"Issuer: {issuer}")
     logger.info(f"Subject: {subject}")
 
-    if issuer == subject:
+    # Check for self-signed certificate based on common name
+    if subject.get('commonName') and issuer.get('commonName') == subject.get('commonName'):
         logger.warning("Self-signed certificate detected.")
-    if "CN" in subject and subject["CN"].startswith("*."):
-        logger.warning(f"Wildcard certificate detected ({subject['CN']}).")
 
+    if 'commonName' in subject and subject['commonName'].startswith('*.'):
+        logger.warning(f"Wildcard certificate detected ({subject['commonName']}).")
+
+    # Log key strength (assuming this function exists)
     check_key_strength(cert_binary)
 
 def check_key_strength(cert_binary):
@@ -265,8 +274,6 @@ def check_supported_protocols(host, port, timeout):
     """ Check supported SSL/TLS protocols by attempting connections with various versions. """
     supported_versions = []
     for protocol_version in [
-        ssl.TLSVersion.TLSv1,
-        ssl.TLSVersion.TLSv1_1,
         ssl.TLSVersion.TLSv1_2,
         ssl.TLSVersion.TLSv1_3
     ]:
