@@ -1,0 +1,17 @@
+{
+    "weak_ciphers": [
+        "RC4-SHA",
+        "RC4-MD5",
+        "DES-CBC3-SHA",
+        "EXP-EDH-RSA-DES-CBC-SHA",
+        "EXP-RC4-MD5",
+        "3DES-EDE3-SHA"
+    ],
+    "strong_ciphers": [
+        "TLS_AES_128_GCM_SHA256",
+        "TLS_AES_256_GCM_SHA384",
+        "TLS_CHACHA20_POLY1305",
+        "ECDHE-RSA-AES128-GCM-SHA256",
+        "ECDHE-RSA-AES256-GCM-SHA384"
+    ]
+}
