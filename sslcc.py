@@ -61,10 +61,12 @@ def load_config(file_path):
         weak_ciphers = config.get('weak_ciphers', WEAK_CIPHERS)
         strong_ciphers = config.get('strong_ciphers', STRONG_CIPHERS)
 
-        if 'weak_ciphers' not in config:
-            logger.warning(f"'weak_ciphers' not found in config, using default: {WEAK_CIPHERS}")
-        if 'strong_ciphers' not in config:
-            logger.warning(f"'strong_ciphers' not found in config, using default: {STRONG_CIPHERS}")
+        if not weak_ciphers:
+            logger.warning(f"'weak_ciphers' is empty or not found in config, using default: {WEAK_CIPHERS}")
+            weak_ciphers = WEAK_CIPHERS
+        if not strong_ciphers:
+            logger.warning(f"'strong_ciphers' is empty or not found in config, using default: {STRONG_CIPHERS}")
+            strong_ciphers = STRONG_CIPHERS
 
         return weak_ciphers, strong_ciphers
     except (FileNotFoundError, json.JSONDecodeError) as e:
@@ -116,19 +118,19 @@ def check_ssl_configuration(host, port=DEFAULT_PORT, timeout=DEFAULT_TIMEOUT):
             with context.wrap_socket(sock, server_hostname=host) as ssock:
                 cert_binary = ssock.getpeercert(binary_form=True)
                 cert = ssock.getpeercert()
-                cipher = ssock.cipher()
+                cipher_name = ssock.cipher()[0]  # Extract cipher name
                 protocol = ssock.version()
 
-                logger.info(f'Connected to {host} using cipher: {cipher[0]}')
+                logger.info(f'Connected to {host} using cipher: {cipher_name}')
                 logger.info(f'Protocol version: {protocol}')
 
                 # Load the configuration for weak and strong ciphers
                 weak_ciphers, strong_ciphers = load_config('config.json')
 
                 # Validate ciphers and protocol
-                validate_ssl_config(cert, cert_binary, cipher[0], protocol, weak_ciphers, strong_ciphers)
+                validate_ssl_config(cert, cert_binary, cipher_name, protocol, weak_ciphers, strong_ciphers)
 
-                # Additional checks can be performed if needed
+                # Additional checks for vulnerabilities and supported protocols
                 check_vulnerabilities(host, port)
                 check_supported_protocols(host, port, timeout)
 
@@ -185,8 +187,23 @@ def check_certificate(cert, cert_binary):
     if logger.level != logging.WARNING:  # Check if quiet mode is active
         logger.debug(f"Certificate details: {cert}")
 
-    issuer = dict(cert.get('issuer', []))
-    subject = dict(cert.get('subject', []))
+    # Safely unpack key-value pairs
+    issuer = {}
+    for item in cert.get('issuer', []):
+        if len(item) == 2:  # Ensure we have a key-value pair
+            key, value = item
+            issuer[key] = value
+        else:
+            logger.warning(f"Unexpected item in issuer: {item}")
+
+    subject = {}
+    for item in cert.get('subject', []):
+        if len(item) == 2:  # Ensure we have a key-value pair
+            key, value = item
+            subject[key] = value
+        else:
+            logger.warning(f"Unexpected item in subject: {item}")
+
     logger.info(f"Issuer: {issuer}")
     logger.info(f"Subject: {subject}")
 
